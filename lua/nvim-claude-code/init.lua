@@ -197,8 +197,13 @@ local function run_claude_code(user_input, context)
 
 	-- Build command to run Claude Code with context and user prompt
 	local escaped_input = user_input:gsub('"', '\\"') -- Escape quotes in user input
+	-- Change to project root before running Claude Code if project root is defined
+	local cd_prefix = ""
+	if context.project_root then
+		cd_prefix = string.format('cd "%s" && ', context.project_root)
+	end
 	-- Pipe context file to Claude Code with user's prompt as argument
-	local cmd = string.format('cat "%s" | %s "%s"', context_file, config.claude_code_binary, escaped_input)
+	local cmd = string.format('%scat "%s" | %s "%s"', cd_prefix, context_file, config.claude_code_binary, escaped_input)
 
 	-- Create terminal window for Claude Code output
 	local term_buf = create_terminal()
