@@ -19,29 +19,29 @@ local function get_current_context()
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false) -- All lines in buffer
 	local content = table.concat(lines, "\n") -- Join lines into single string
 
-	-- Get cursor position and check for text selection
-	local cursor_line = vim.fn.line(".") -- Current cursor line number
-	local selection_start, selection_end = nil, nil -- Will store selection range if exists
-
 	-- Check if user has text selected by examining selection marks
 	-- Selection marks persist even after exiting visual mode
-	local mark_start = vim.fn.line("'<") -- Start line of last selection
-	local mark_end = vim.fn.line("'>") -- End line of last selection
-	
+	local mark_start = vim.api.nvim_buf_get_mark(0, "<")
+	local mark_end = vim.api.nvim_buf_get_mark(0, ">")
+	local selection_start, selection_end = nil, nil -- Will store selection range if exists
+
 	-- Only consider it a valid selection if marks are different and within buffer bounds
 	if mark_start > 0 and mark_end > 0 and mark_start ~= mark_end and mark_start <= #lines and mark_end <= #lines then
 		selection_start = mark_start
 		selection_end = mark_end
 	end
 
+	-- Get cursor position and check for text selection
+	local cursor_line = vim.fn.line(".") -- Current cursor line number
+
 	-- Attempt to find the project root directory
 	-- Look for common project indicators moving up the directory tree
 	local project_root = nil
 	if filename and filename ~= "" then
 		-- Search for project markers (git repo, package files, etc.)
-		local found = vim.fs.find({'.git', 'package.json', 'Cargo.toml', 'pyproject.toml', 'go.mod'}, {
+		local found = vim.fs.find({ ".git", "package.json", "Cargo.toml", "pyproject.toml", "go.mod" }, {
 			path = filename, -- Start from current file's directory
-			upward = true -- Search upward through parent directories
+			upward = true, -- Search upward through parent directories
 		})
 		if found and #found > 0 then
 			project_root = vim.fs.dirname(found[1]) -- Get directory containing project marker
@@ -63,7 +63,14 @@ end
 -- Monitor Claude Code output for file replacement requests
 -- This function checks if Claude Code wants to update the current file
 -- by looking for a special token in the output
-local function check_for_file_replacement(output_lines, context, term_buf, temp_file, replacement_token, cleanup_callback)
+local function check_for_file_replacement(
+	output_lines,
+	context,
+	term_buf,
+	temp_file,
+	replacement_token,
+	cleanup_callback
+)
 	-- Scan through all output lines looking for the replacement token
 	for _, line in ipairs(output_lines) do
 		if line:find(replacement_token, 1, true) then -- Found the replacement signal
@@ -77,7 +84,11 @@ local function check_for_file_replacement(output_lines, context, term_buf, temp_
 						-- Replace entire buffer content with new content
 						vim.api.nvim_buf_set_lines(original_buf, 0, -1, false, temp_content)
 						-- Send confirmation message to terminal
-						local success = pcall(vim.fn.chansend, vim.b[term_buf].terminal_job_id, "\r\n✓ File contents replaced in editor buffer\r\n")
+						local success = pcall(
+							vim.fn.chansend,
+							vim.b[term_buf].terminal_job_id,
+							"\r\n✓ File contents replaced in editor buffer\r\n"
+						)
 						if not success then
 							vim.notify("File replaced but could not send terminal message", vim.log.levels.WARN)
 						end
@@ -85,25 +96,29 @@ local function check_for_file_replacement(output_lines, context, term_buf, temp_
 				end
 			end
 			-- Clean up temporary files after successful replacement
-			if cleanup_callback then cleanup_callback() end
+			if cleanup_callback then
+				cleanup_callback()
+			end
 			return -- Exit early since we found and processed the token
 		end
 	end
 	-- If no replacement token found in any output line, still clean up
-	if cleanup_callback then cleanup_callback() end
+	if cleanup_callback then
+		cleanup_callback()
+	end
 end
 
 -- Create a new terminal window for displaying Claude Code output
 -- Opens a horizontal split and sets up a terminal buffer
 local function create_terminal()
 	-- Create horizontal split window for terminal output
-	vim.cmd('split') -- Split window horizontally
-	vim.cmd('resize 15') -- Set terminal window height to 15 lines
-	
+	vim.cmd("split") -- Split window horizontally
+	vim.cmd("resize 15") -- Set terminal window height to 15 lines
+
 	-- Create a new buffer for the terminal
 	local term_buf = vim.api.nvim_create_buf(false, true) -- unlisted, scratch buffer
 	vim.api.nvim_win_set_buf(0, term_buf) -- Set current window to use terminal buffer
-	
+
 	return term_buf
 end
 
@@ -115,7 +130,7 @@ local function run_claude_code(user_input, context)
 	local output_file = vim.fn.tempname() -- File for Claude to write changes to
 	-- Generate unique token that Claude will output when it modifies the file
 	local replacement_token = "NVIM_REPLACE_" .. math.random(100000, 999999)
-	
+
 	-- Initialize the output file with current content so Claude can read it first
 	-- This allows Claude to see the current state before making changes
 	if context.filename and context.filename ~= "" then
@@ -128,10 +143,11 @@ local function run_claude_code(user_input, context)
 			return
 		end
 	end
-	
+
 	-- Build instructions for Claude Code explaining the integration protocol
 	-- This tells Claude how to interact with the editor through temporary files
-	local context_info = string.format([[
+	local context_info = string.format(
+		[[
   You are processing a file that's open in an editor. You will receive the filename and project root, and either the current cursor line
   or selected lines, as well as a prompt. Process and execute the prompt as given. You can also do other things as necessary within the
   given project.
@@ -141,7 +157,11 @@ local function run_claude_code(user_input, context)
   2. Write the complete new file contents to the same temporary file: %s
   3. After writing to the temporary file, output this exact token: %s
   The editor will detect this token and replace the buffer contents with the temporary file.
-  ]], output_file, output_file, replacement_token)
+  ]],
+		output_file,
+		output_file,
+		replacement_token
+	)
 
 	-- Add current file information to context
 	-- Show relative path if we detected a project root, otherwise show full path
@@ -245,7 +265,7 @@ local function run_claude_code(user_input, context)
 					os.remove(context_file) -- Delete context temp file
 					os.remove(output_file) -- Delete output temp file
 				end
-				
+
 				-- Only check for file replacement if Claude Code succeeded
 				if code == 0 then
 					check_for_file_replacement(output_lines, context, term_buf, output_file, replacement_token, cleanup)
@@ -257,7 +277,7 @@ local function run_claude_code(user_input, context)
 	})
 
 	-- Enter insert mode in the terminal so user can see live output
-	vim.cmd('startinsert')
+	vim.cmd("startinsert")
 end
 
 -- Main entry point called when user presses <leader>CC
