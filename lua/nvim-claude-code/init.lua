@@ -149,6 +149,7 @@ local function create_terminal()
 
 	-- Create a new buffer for the terminal
 	local term_buf = vim.api.nvim_create_buf(false, true) -- unlisted, scratch buffer
+	vim.api.nvim_set_option_value("buftype", "terminal", { buf = term_buf })
 	vim.api.nvim_win_set_buf(0, term_buf) -- Set current window to use terminal buffer
 
 	return term_buf
