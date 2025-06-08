@@ -289,6 +289,12 @@ local function run_claude_code(user_input, context)
 				-- Read terminal buffer content to check for replacement token
 				local term_lines = vim.api.nvim_buf_get_lines(term_buf, 0, -1, false)
 				check_for_file_replacement(term_lines, context, term_buf, output_file, replacement_token, cleanup)
+				
+				-- Close the terminal window automatically when command finishes
+				local term_win = vim.fn.bufwinid(term_buf)
+				if term_win ~= -1 then
+					vim.api.nvim_win_close(term_win, false)
+				end
 			end)
 		end,
 	})
