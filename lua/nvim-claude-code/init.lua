@@ -124,18 +124,12 @@ end
 local function run_terminal_command(cmd, callback, opts)
 	opts = opts or {}
 	local height = opts.height or 15
-	local width = opts.width
 
 	-- Store output lines
 	local output_lines = {}
 
 	-- Create vertical split
-	vim.cmd("vsplit")
-
-	-- Set width if specified
-	if width then
-		vim.cmd("vertical resize " .. width)
-	end
+	vim.cmd("split")
 
 	-- Create a new scratch buffer
 	local buf = vim.api.nvim_create_buf(false, true)
