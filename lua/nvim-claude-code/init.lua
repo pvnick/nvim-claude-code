@@ -156,8 +156,7 @@ local function run_terminal_command(cmd, callback, opts)
 
 			-- Call the callback with the collected output
 			if callback then
-				local output = table.concat(output_lines, "\n")
-				callback(output, exit_code)
+				callback(output_lines, exit_code)
 			end
 		end)
 	end
