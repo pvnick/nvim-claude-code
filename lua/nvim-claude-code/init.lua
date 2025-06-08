@@ -9,6 +9,47 @@ local config = {
 	claude_code_binary = "claude", -- Path or command to run Claude Code CLI
 }
 
+local function is_valid_line_range(start_line, end_line, total_lines)
+	return start_line > 0
+		and end_line > 0
+		and start_line <= total_lines
+		and end_line <= total_lines
+		and start_line ~= end_line
+end
+
+local function get_visual_selection_range(lines)
+	local start_pos = vim.fn.getpos("v")
+	local end_pos = vim.fn.getpos(".")
+
+	local start_line = math.min(start_pos[2], end_pos[2])
+	local end_line = math.max(start_pos[2], end_pos[2])
+
+	if is_valid_line_range(start_line, end_line, #lines) then
+		return start_line, end_line
+	end
+	return nil, nil
+end
+
+local function get_mark_selection_range(lines)
+	local mark_start = vim.api.nvim_buf_get_mark(0, "<")[1]
+	local mark_end = vim.api.nvim_buf_get_mark(0, ">")[1]
+
+	if is_valid_line_range(mark_start, mark_end, #lines) then
+		return mark_start, mark_end
+	end
+	return nil, nil
+end
+
+local function get_selection_range(lines)
+	local mode = vim.api.nvim_get_mode().mode
+
+	if mode:match("^[vV\22]") then
+		return get_visual_selection_range(lines)
+	else
+		return get_mark_selection_range(lines)
+	end
+end
+
 -- Extract context from the current Neovim session
 -- Returns a table containing all relevant information about the current file,
 -- cursor position, selection, and project structure
@@ -19,41 +60,8 @@ local function get_current_context()
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false) -- All lines in buffer
 	local content = table.concat(lines, "\n") -- Join lines into single string
 
-	-- Check if user has text selected by examining visual mode and selection marks
-	local selection_start, selection_end = nil, nil -- Will store selection range if exists
-	local mode = vim.api.nvim_get_mode().mode
-
-	-- Check if currently in visual mode or if we have a recent visual selection
-	if mode:match("^[vV\22]") then -- v, V, or Ctrl-V (visual modes)
-		-- Get visual selection range while in visual mode
-		local start_pos = vim.fn.getpos("v")
-		local end_pos = vim.fn.getpos(".")
-
-		-- Ensure start comes before end
-		local start_line = math.min(start_pos[2], end_pos[2])
-		local end_line = math.max(start_pos[2], end_pos[2])
-
-		if start_line ~= end_line and start_line > 0 and end_line <= #lines then
-			selection_start = start_line
-			selection_end = end_line
-		end
-	else
-		-- Not in visual mode, check for persistent marks from previous selection
-		local mark_start = vim.api.nvim_buf_get_mark(0, "<")[1]
-		local mark_end = vim.api.nvim_buf_get_mark(0, ">")[1]
-
-		-- Only consider it a valid selection if marks are different and within buffer bounds
-		if
-			mark_start > 0
-			and mark_end > 0
-			and mark_start ~= mark_end
-			and mark_start <= #lines
-			and mark_end <= #lines
-		then
-			selection_start = mark_start
-			selection_end = mark_end
-		end
-	end
+	-- Get selection range if any
+	local selection_start, selection_end = get_selection_range(lines)
 
 	-- Get cursor position and check for text selection
 	local cursor_line = vim.fn.line(".") -- Current cursor line number
@@ -152,8 +160,9 @@ local function run_claude_code(user_input, context)
 	-- Create temporary files for communication with Claude Code
 	local context_file = vim.fn.tempname() -- File to pass context to Claude
 	local output_file = vim.fn.tempname() -- File for Claude to write changes to
-	-- Generate unique token that Claude will output when it modifies the file
-	local replacement_token = "NVIM_REPLACE_" .. math.random(100000, 999999)
+	-- Generate unique number that Claude will combine with NVIM_REPLACE_ prefix
+	local replacement_number = math.random(100000, 999999)
+	local replacement_token = "NVIM_REPLACE_" .. replacement_number
 
 	-- Initialize the output file with current content so Claude can read it first
 	-- This allows Claude to see the current state before making changes
@@ -177,14 +186,14 @@ local function run_claude_code(user_input, context)
   given project.
   
   IMPORTANT: If you need to modify the currently open file, do NOT write to disk directly. Instead:
-  1. Use the Read tool to read this temporary file first: %s
-  2. Write the complete new file contents to the same temporary file: %s
-  3. After writing to the temporary file, output this exact token: %s
+  1. Read the current file contents from: %s
+  2. Write your complete updated file contents to: %s  
+  3. Output a token by concatenating "NVIM_REPLACE_" with "%s"
   The editor will detect this token and replace the buffer contents with the temporary file.
   ]],
 		output_file,
 		output_file,
-		replacement_token
+		replacement_number
 	)
 
 	-- Add current file information to context
@@ -260,7 +269,7 @@ local function run_claude_code(user_input, context)
 	local output_lines = {}
 
 	-- Start Claude Code process in terminal with callback handlers
-	local job_id = vim.fn.termopen(cmd, {
+	local job_id = vim.api.nvim_open_term(term_buf, {
 		-- Capture standard output and store for file replacement detection
 		on_stdout = function(_, data)
 			if data then
