@@ -41,7 +41,7 @@ local function get_current_context()
 	}
 end
 
-local function check_for_file_replacement(output_lines, context, output_buf, temp_file, replacement_token)
+local function check_for_file_replacement(output_lines, context, term_buf, temp_file, replacement_token)
 	for _, line in ipairs(output_lines) do
 		if line:find(replacement_token, 1, true) then
 			if vim.fn.filereadable(temp_file) == 1 then
@@ -50,10 +50,7 @@ local function check_for_file_replacement(output_lines, context, output_buf, tem
 					local original_buf = vim.fn.bufnr(context.filename)
 					if original_buf ~= -1 then
 						vim.api.nvim_buf_set_lines(original_buf, 0, -1, false, temp_content)
-						vim.api.nvim_buf_set_lines(output_buf, -1, -1, false, {
-							"",
-							"✓ File contents replaced in editor buffer"
-						})
+						vim.fn.chansend(vim.b[term_buf].terminal_job_id, "\r\n✓ File contents replaced in editor buffer\r\n")
 					end
 				end
 			end
@@ -62,36 +59,14 @@ local function check_for_file_replacement(output_lines, context, output_buf, tem
 	end
 end
 
-local function create_output_window()
-	local buf = vim.api.nvim_create_buf(false, true)
-	vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
-	vim.api.nvim_buf_set_option(buf, "swapfile", false)
-	vim.api.nvim_buf_set_option(buf, "filetype", "markdown")
-	vim.api.nvim_buf_set_option(buf, "wrap", true)
-
-	local width = math.floor(vim.o.columns * 0.8)
-	local height = math.floor(vim.o.lines * 0.8)
-	local row = math.floor((vim.o.lines - height) / 2)
-	local col = math.floor((vim.o.columns - width) / 2)
-
-	local opts = {
-		relative = "editor",
-		width = width,
-		height = height,
-		row = row,
-		col = col,
-		style = "minimal",
-		border = "rounded",
-		title = " Claude Code Output ",
-		title_pos = "center",
-	}
-
-	local win = vim.api.nvim_open_win(buf, true, opts)
-
-	vim.api.nvim_buf_set_keymap(buf, "n", "q", ":q<CR>", { noremap = true, silent = true })
-	vim.api.nvim_buf_set_keymap(buf, "n", "<Esc>", ":q<CR>", { noremap = true, silent = true })
-
-	return buf, win
+local function create_terminal()
+	vim.cmd('split')
+	vim.cmd('resize 15')
+	
+	local term_buf = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_win_set_buf(0, term_buf)
+	
+	return term_buf
 end
 
 local function run_claude_code(user_input, context)
@@ -150,15 +125,11 @@ local function run_claude_code(user_input, context)
 	local escaped_input = user_input:gsub('"', '\\"')
 	local cmd = string.format('cat "%s" | %s "%s"', temp_file, config.claude_code_binary, escaped_input)
 
-	local output_buf, output_win = create_output_window()
-
-	vim.api.nvim_buf_set_lines(output_buf, 0, -1, false, { "Running Claude Code...", "" })
+	local term_buf = create_terminal()
 
 	local output_lines = {}
 
-	vim.fn.jobstart(cmd, {
-		stdout_buffered = false,
-		stderr_buffered = false,
+	local job_id = vim.fn.termopen(cmd, {
 		on_stdout = function(_, data)
 			if data then
 				for _, line in ipairs(data) do
@@ -166,9 +137,6 @@ local function run_claude_code(user_input, context)
 						table.insert(output_lines, line)
 					end
 				end
-				vim.schedule(function()
-					vim.api.nvim_buf_set_lines(output_buf, 0, -1, false, output_lines)
-				end)
 			end
 		end,
 		on_stderr = function(_, data)
@@ -178,24 +146,19 @@ local function run_claude_code(user_input, context)
 						table.insert(output_lines, "ERROR: " .. line)
 					end
 				end
-				vim.schedule(function()
-					vim.api.nvim_buf_set_lines(output_buf, 0, -1, false, output_lines)
-				end)
 			end
 		end,
 		on_exit = function(_, code)
 			vim.schedule(function()
-				if code ~= 0 then
-					table.insert(output_lines, "")
-					table.insert(output_lines, string.format("Process exited with code: %d", code))
-					vim.api.nvim_buf_set_lines(output_buf, 0, -1, false, output_lines)
-				else
-					check_for_file_replacement(output_lines, context, output_buf, temp_file, replacement_token)
+				if code == 0 then
+					check_for_file_replacement(output_lines, context, term_buf, temp_file, replacement_token)
 				end
 			end)
 			os.remove(temp_file)
 		end,
 	})
+
+	vim.cmd('startinsert')
 end
 
 function M.run()
