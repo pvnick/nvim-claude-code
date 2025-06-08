@@ -21,8 +21,8 @@ local function get_current_context()
 
 	-- Check if user has text selected by examining selection marks
 	-- Selection marks persist even after exiting visual mode
-	local mark_start = vim.api.nvim_buf_get_mark(0, "<")
-	local mark_end = vim.api.nvim_buf_get_mark(0, ">")
+	local mark_start = vim.api.nvim_buf_get_mark(0, "<")[1]
+	local mark_end = vim.api.nvim_buf_get_mark(0, ">")[1]
 	local selection_start, selection_end = nil, nil -- Will store selection range if exists
 
 	-- Only consider it a valid selection if marks are different and within buffer bounds
