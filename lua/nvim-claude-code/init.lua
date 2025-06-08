@@ -19,16 +19,40 @@ local function get_current_context()
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false) -- All lines in buffer
 	local content = table.concat(lines, "\n") -- Join lines into single string
 
-	-- Check if user has text selected by examining selection marks
-	-- Selection marks persist even after exiting visual mode
-	local mark_start = vim.api.nvim_buf_get_mark(0, "<")[1]
-	local mark_end = vim.api.nvim_buf_get_mark(0, ">")[1]
+	-- Check if user has text selected by examining visual mode and selection marks
 	local selection_start, selection_end = nil, nil -- Will store selection range if exists
+	local mode = vim.api.nvim_get_mode().mode
 
-	-- Only consider it a valid selection if marks are different and within buffer bounds
-	if mark_start > 0 and mark_end > 0 and mark_start ~= mark_end and mark_start <= #lines and mark_end <= #lines then
-		selection_start = mark_start
-		selection_end = mark_end
+	-- Check if currently in visual mode or if we have a recent visual selection
+	if mode:match("^[vV\22]") then -- v, V, or Ctrl-V (visual modes)
+		-- Get visual selection range while in visual mode
+		local start_pos = vim.fn.getpos("v")
+		local end_pos = vim.fn.getpos(".")
+
+		-- Ensure start comes before end
+		local start_line = math.min(start_pos[2], end_pos[2])
+		local end_line = math.max(start_pos[2], end_pos[2])
+
+		if start_line ~= end_line and start_line > 0 and end_line <= #lines then
+			selection_start = start_line
+			selection_end = end_line
+		end
+	else
+		-- Not in visual mode, check for persistent marks from previous selection
+		local mark_start = vim.api.nvim_buf_get_mark(0, "<")[1]
+		local mark_end = vim.api.nvim_buf_get_mark(0, ">")[1]
+
+		-- Only consider it a valid selection if marks are different and within buffer bounds
+		if
+			mark_start > 0
+			and mark_end > 0
+			and mark_start ~= mark_end
+			and mark_start <= #lines
+			and mark_end <= #lines
+		then
+			selection_start = mark_start
+			selection_end = mark_end
+		end
 	end
 
 	-- Get cursor position and check for text selection
