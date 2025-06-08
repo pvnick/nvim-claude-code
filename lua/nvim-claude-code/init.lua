@@ -268,8 +268,8 @@ local function run_claude_code(user_input, context)
 	-- Track output lines to detect file replacement requests
 	local output_lines = {}
 
-	-- Start Claude Code process in terminal with callback handlers
-	local job_id = vim.api.nvim_open_term(term_buf, {
+	-- Start Claude Code process with callback handlers
+	local job_id = vim.fn.jobstart(cmd, {
 		-- Capture standard output and store for file replacement detection
 		on_stdout = function(_, data)
 			if data then
@@ -307,7 +307,14 @@ local function run_claude_code(user_input, context)
 				end
 			end)
 		end,
+		-- Connect job output to terminal buffer
+		pty = true,
+		stdout_buffered = false,
+		stderr_buffered = false,
 	})
+
+	-- Store job id in terminal buffer for later communication
+	vim.b[term_buf].terminal_job_id = job_id
 
 	-- Enter insert mode in the terminal so user can see live output
 	vim.cmd("startinsert")
