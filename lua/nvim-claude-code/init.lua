@@ -19,6 +19,17 @@ local function get_current_context()
 		selection_end = vim.fn.line("'>")
 	end
 
+	local project_root = nil
+	if filename and filename ~= "" then
+		local found = vim.fs.find({'.git', 'package.json', 'Cargo.toml', 'pyproject.toml', 'go.mod'}, {
+			path = filename,
+			upward = true
+		})
+		if found and #found > 0 then
+			project_root = vim.fs.dirname(found[1])
+		end
+	end
+
 	return {
 		filename = filename,
 		content = content,
@@ -26,7 +37,29 @@ local function get_current_context()
 		cursor_line = cursor_line,
 		selection_start = selection_start,
 		selection_end = selection_end,
+		project_root = project_root,
 	}
+end
+
+local function check_for_file_replacement(output_lines, context, output_buf, temp_file, replacement_token)
+	for _, line in ipairs(output_lines) do
+		if line:find(replacement_token, 1, true) then
+			if vim.fn.filereadable(temp_file) == 1 then
+				local temp_content = vim.fn.readfile(temp_file)
+				if context.filename and context.filename ~= "" then
+					local original_buf = vim.fn.bufnr(context.filename)
+					if original_buf ~= -1 then
+						vim.api.nvim_buf_set_lines(original_buf, 0, -1, false, temp_content)
+						vim.api.nvim_buf_set_lines(output_buf, -1, -1, false, {
+							"",
+							"✓ File contents replaced in editor buffer"
+						})
+					end
+				end
+			end
+			return
+		end
+	end
 end
 
 local function create_output_window()
@@ -63,10 +96,30 @@ end
 
 local function run_claude_code(user_input, context)
 	local temp_file = vim.fn.tempname()
-	local context_info = ""
+	local replacement_token = "NVIM_REPLACE_" .. math.random(100000, 999999)
+	local context_info = string.format([[
+  You are processing a file that's open in an editor. You will receive the filename and project root, and either the current cursor line
+  or selected lines, as well as a prompt. Process and execute the prompt as given. You can also do other things as necessary within the
+  given project.
+  
+  IMPORTANT: If you need to modify the currently open file, do NOT write to disk directly. Instead:
+  1. Write the complete new file contents to this temporary file: %s
+  2. After writing to the temporary file, output this exact token: %s
+  The editor will detect this token and replace the buffer contents with the temporary file.
+  ]], temp_file, replacement_token)
 
 	if context.filename and context.filename ~= "" then
-		context_info = context_info .. "Current file: " .. context.filename .. "\n\n"
+		local display_filename = context.filename
+		if context.project_root and context.filename:sub(1, #context.project_root) == context.project_root then
+			display_filename = context.filename:sub(#context.project_root + 2)
+		end
+		context_info = context_info .. "Current file: " .. display_filename .. "\n"
+	end
+
+	if context.project_root then
+		context_info = context_info .. "Project root: " .. context.project_root .. "\n\n"
+	else
+		context_info = context_info .. "\n"
 	end
 
 	if context.selection_start and context.selection_end then
@@ -136,6 +189,8 @@ local function run_claude_code(user_input, context)
 					table.insert(output_lines, "")
 					table.insert(output_lines, string.format("Process exited with code: %d", code))
 					vim.api.nvim_buf_set_lines(output_buf, 0, -1, false, output_lines)
+				else
+					check_for_file_replacement(output_lines, context, output_buf, temp_file, replacement_token)
 				end
 			end)
 			os.remove(temp_file)
@@ -161,4 +216,3 @@ function M.setup(opts)
 end
 
 return M
-
