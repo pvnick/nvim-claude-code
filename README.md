@@ -19,18 +19,20 @@ A Neovim plugin that integrates [Claude Code](https://claude.ai/code) directly i
 ### Using lazy.nvim
 
 ```lua
-{
-  dir = "pvnick/nvim-claude-code",
-  name = "nvim-claude-code",
-  config = function()
-    require("nvim-claude-code").setup({
-      claude_code_binary = "claude" -- default
-    })
-    
-    vim.keymap.set('n', '<leader>CC', function()
-      require('nvim-claude-code').run()
-    end, { desc = 'Run Claude Code' })
-  end
+return {
+  {
+    "pvnick/nvim-claude-code",
+    name = "nvim-claude-code",
+    config = function()
+      require("nvim-claude-code").setup({
+        claude_code_binary = "claude", -- default
+      })
+
+      vim.keymap.set("n", "<leader>CC", function()
+        require("nvim-claude-code").run()
+      end, { desc = "Run Claude Code" })
+    end,
+  },
 }
 ```
 
