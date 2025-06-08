@@ -31,7 +31,7 @@ return {
         claude_code_binary = "claude", -- default
       })
 
-      vim.keymap.set({"n", "v"}, "<leader>CC", function()
+      vim.keymap.set({"n", "x"}, "<leader>CC", function()
         require("nvim-claude-code").run()
       end, { desc = "Run Claude Code" })
     end,
@@ -46,7 +46,7 @@ use {
   "pvnick/nvim-claude-code",
   config = function()
     require("nvim-claude-code").setup()
-    vim.keymap.set({'n', 'v'}, '<leader>CC', require('nvim-claude-code').run, { desc = 'Run Claude Code' })
+    vim.keymap.set({'n', 'x'}, '<leader>CC', require('nvim-claude-code').run, { desc = 'Run Claude Code' })
   end
 }
 ```
@@ -63,7 +63,7 @@ use {
    ```lua
    require("nvim-claude-code").setup()
    
-   vim.keymap.set({'n', 'v'}, '<leader>CC', function()
+   vim.keymap.set({'n', 'x'}, '<leader>CC', function()
      require('nvim-claude-code').run()
    end, { desc = 'Run Claude Code' })
    ```
