@@ -287,7 +287,15 @@ local function run_claude_code(user_input, context)
 	if context.project_root then
 		cmd = "cd " .. vim.fn.shellescape(context.project_root) .. " && "
 	end
-	cmd = cmd .. "cat " .. vim.fn.shellescape(context_file) .. " | " .. config.claude_code_binary .. " " .. vim.fn.shellescape(user_input)
+	cmd = cmd
+		.. "cat "
+		.. vim.fn.shellescape(context_file)
+		.. " | "
+		.. config.claude_code_binary
+		.. " "
+		.. vim.fn.shellescape(user_input)
+
+	vim.notify(cmd, vim.log.levels.INFO)
 
 	-- Create terminal window for Claude Code output
 	run_terminal_command(cmd, function(output)
@@ -299,9 +307,6 @@ local function run_claude_code(user_input, context)
 
 		check_for_file_replacement(output, context, output_file, replacement_token, cleanup)
 	end)
-
-	-- Enter insert mode in the terminal so user can see live output
-	vim.cmd("startinsert")
 end
 
 -- Main entry point called when user presses <leader>CC
