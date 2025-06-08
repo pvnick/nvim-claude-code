@@ -283,17 +283,11 @@ local function run_claude_code(user_input, context)
 
 	-- Build command to run Claude Code with context and user prompt
 	-- Change to project root before running Claude Code if project root is defined
-	local cmd = {}
+	local cmd = ""
 	if context.project_root then
-		table.insert(cmd, "cd")
-		table.insert(cmd, context.project_root)
-		table.insert(cmd, "&&")
+		cmd = "cd " .. vim.fn.shellescape(context.project_root) .. " && "
 	end
-	table.insert(cmd, "cat")
-	table.insert(cmd, context_file)
-	table.insert(cmd, "|")
-	table.insert(cmd, config.claude_code_binary)
-	table.insert(cmd, user_input)
+	cmd = cmd .. "cat " .. vim.fn.shellescape(context_file) .. " | " .. config.claude_code_binary .. " " .. vim.fn.shellescape(user_input)
 
 	-- Create terminal window for Claude Code output
 	run_terminal_command(cmd, function(output)
