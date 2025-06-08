@@ -95,7 +95,7 @@ end
 -- Monitor Claude Code output for file replacement requests
 -- This function checks if Claude Code wants to update the current file
 -- by looking for a special token in the output
-local function check_for_file_replacement(output_lines, context, temp_file, replacement_token, cleanup_callback)
+local function check_for_file_replacement(output_lines, context, temp_file, replacement_token)
 	-- Scan through all output lines looking for the replacement token
 	for _, line in ipairs(output_lines) do
 		if line:find(replacement_token, 1, true) then -- Found the replacement signal
@@ -113,75 +113,86 @@ local function check_for_file_replacement(output_lines, context, temp_file, repl
 					end
 				end
 			end
-			-- Clean up temporary files after successful replacement
-			if cleanup_callback then
-				cleanup_callback()
-			end
 			return -- Exit early since we found and processed the token
 		end
-	end
-	-- If no replacement token found in any output line, still clean up
-	if cleanup_callback then
-		cleanup_callback()
 	end
 end
 
 -- Runs a command in the background and captures its output.
 -- The `on_finish` parameter is an optional callback function to run
 -- once the command is complete, receiving the output as an argument.
-local function run_terminal_command(command, on_finish)
+local function run_terminal_command(cmd, callback, opts)
+	opts = opts or {}
+	local height = opts.height or 15
+	local width = opts.width
+
+	-- Store output lines
 	local output_lines = {}
-	local stderr_lines = {}
 
-	vim.fn.jobstart(command, {
-		term = true,
-		-- The `on_stdout` callback is fired for each chunk of output.
-		on_stdout = function(job_id, data, event)
-			-- `data` is a table of output lines. We append them to our list.
-			if data then
-				for _, line in ipairs(data) do
-					if line ~= "" then
-						table.insert(output_lines, line)
-					end
+	-- Create vertical split
+	vim.cmd("vsplit")
+
+	-- Set width if specified
+	if width then
+		vim.cmd("vertical resize " .. width)
+	end
+
+	-- Create a new scratch buffer
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_set_current_buf(buf)
+
+	-- Set buffer options
+	vim.bo[buf].buftype = "nofile"
+	vim.bo[buf].bufhidden = "wipe"
+	vim.bo[buf].swapfile = false
+	vim.bo[buf].filetype = "terminal"
+
+	-- Resize to specified height
+	vim.cmd("resize " .. height)
+
+	-- Function to handle job exit
+	local function on_exit(job_id, exit_code, event_type)
+		-- Schedule the callback and buffer cleanup to run in the main thread
+		vim.schedule(function()
+			-- Close the buffer/window
+			local win = vim.fn.bufwinid(buf)
+			if win ~= -1 then
+				vim.api.nvim_win_close(win, true)
+			end
+
+			-- Call the callback with the collected output
+			if callback then
+				local output = table.concat(output_lines, "\n")
+				callback(output, exit_code)
+			end
+		end)
+	end
+
+	-- Function to handle stdout
+	local function on_stdout(job_id, data, event_type)
+		-- data is a list of lines
+		if data then
+			for _, line in ipairs(data) do
+				-- Skip empty lines at the end
+				if line ~= "" then
+					table.insert(output_lines, line)
 				end
 			end
-		end,
+		end
+	end
 
-		-- It's also good practice to capture stderr.
-		on_stderr = function(job_id, data, event)
-			if data then
-				for _, line in ipairs(data) do
-					if line ~= "" then
-						table.insert(stderr_lines, line)
-					end
-				end
-			end
-		end,
-
-		-- The `on_exit` callback is fired when the command is finished.
-		on_exit = function(job_id, exit_code, event)
-			-- Now that the job is done, we can process the captured output.
-			if exit_code ~= 0 then
-				local msg = "Job '" .. command .. "' failed with exit code: " .. exit_code
-				vim.notify(msg, vim.log.levels.ERROR)
-				-- You might want to show stderr here
-				print("Stderr:")
-				print(vim.inspect(stderr_lines))
-				return
-			end
-
-			vim.notify("Job '" .. command .. "' finished successfully.", vim.log.levels.INFO)
-
-			-- If a callback was provided, call it with the output
-			if on_finish and type(on_finish) == "function" then
-				on_finish(output_lines)
-			else
-				-- Default behavior: print the captured output
-				print("Captured output:")
-				print(vim.inspect(output_lines))
-			end
-		end,
+	-- Start the terminal job
+	local job_id = vim.fn.termopen(cmd, {
+		on_exit = on_exit,
+		on_stdout = on_stdout,
+		stdout_buffered = true, -- Buffer stdout to get complete lines
 	})
+
+	-- Enter insert mode to interact with the terminal
+	vim.cmd("startinsert")
+
+	-- Return the job ID in case the caller wants to manipulate it
+	return job_id, buf
 end
 
 -- Main function that orchestrates the Claude Code integration
@@ -296,17 +307,12 @@ local function run_claude_code(user_input, context)
 		.. " "
 		.. vim.fn.shellescape(user_input)
 
-	vim.notify(cmd, vim.log.levels.INFO)
-
 	-- Create terminal window for Claude Code output
-	run_terminal_command(cmd, function(output)
-		-- Function to clean up temporary files
-		local cleanup = function()
-			os.remove(context_file)
-			os.remove(output_file)
-		end
-
-		check_for_file_replacement(output, context, output_file, replacement_token, cleanup)
+	run_terminal_command(cmd, function(output, exit_code)
+		check_for_file_replacement(output, context, output_file, replacement_token)
+		-- Clean up temp files
+		os.remove(context_file)
+		os.remove(output_file)
 	end)
 end
 
