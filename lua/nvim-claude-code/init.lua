@@ -134,6 +134,7 @@ local function run_terminal_command(command, on_finish)
 	local stderr_lines = {}
 
 	vim.fn.jobstart(command, {
+		term = true,
 		-- The `on_stdout` callback is fired for each chunk of output.
 		on_stdout = function(job_id, data, event)
 			-- `data` is a table of output lines. We append them to our list.
