@@ -23,11 +23,15 @@ local function get_current_context()
 	local cursor_line = vim.fn.line(".") -- Current cursor line number
 	local selection_start, selection_end = nil, nil -- Will store selection range if exists
 
-	-- Check if user has text selected in visual mode
-	local mode = vim.fn.mode()
-	if mode == "v" or mode == "V" or mode == "\22" then -- visual, visual-line, or visual-block mode
-		selection_start = vim.fn.line("'<") -- Start line of selection
-		selection_end = vim.fn.line("'>") -- End line of selection
+	-- Check if user has text selected by examining selection marks
+	-- Selection marks persist even after exiting visual mode
+	local mark_start = vim.fn.line("'<") -- Start line of last selection
+	local mark_end = vim.fn.line("'>") -- End line of last selection
+	
+	-- Only consider it a valid selection if marks are different and within buffer bounds
+	if mark_start > 0 and mark_end > 0 and mark_start ~= mark_end and mark_start <= #lines and mark_end <= #lines then
+		selection_start = mark_start
+		selection_end = mark_end
 	end
 
 	-- Attempt to find the project root directory
