@@ -20,7 +20,7 @@ A Neovim plugin that integrates [Claude Code](https://claude.ai/code) directly i
 
 ```lua
 {
-  dir = "/path/to/nvim-claude-code",
+  dir = "pvnick/nvim-claude-code",
   name = "nvim-claude-code",
   config = function()
     require("nvim-claude-code").setup({
@@ -38,7 +38,7 @@ A Neovim plugin that integrates [Claude Code](https://claude.ai/code) directly i
 
 ```lua
 use {
-  "/path/to/nvim-claude-code",
+  "pvnick/nvim-claude-code",
   config = function()
     require("nvim-claude-code").setup()
     vim.keymap.set('n', '<leader>CC', require('nvim-claude-code').run, { desc = 'Run Claude Code' })
