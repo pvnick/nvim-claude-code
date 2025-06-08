@@ -12,5 +12,6 @@ let g:loaded_nvim_claude_code = 1
 command! ClaudeCode lua require('nvim-claude-code').run()
 
 " Set up the default keymap for easy access
-" <leader>CC opens the Claude Code input prompt
+" <leader>CC opens the Claude Code input prompt in both normal and visual modes
 nnoremap <leader>CC :ClaudeCode<CR>
+vnoremap <leader>CC :ClaudeCode<CR>
