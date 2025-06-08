@@ -34,6 +34,7 @@ local function create_output_window()
     vim.api.nvim_buf_set_option(buf, 'buftype', 'nofile')
     vim.api.nvim_buf_set_option(buf, 'swapfile', false)
     vim.api.nvim_buf_set_option(buf, 'filetype', 'markdown')
+    vim.api.nvim_buf_set_option(buf, 'wrap', true)
     
     local width = math.floor(vim.o.columns * 0.8)
     local height = math.floor(vim.o.lines * 0.8)
