@@ -95,14 +95,7 @@ end
 -- Monitor Claude Code output for file replacement requests
 -- This function checks if Claude Code wants to update the current file
 -- by looking for a special token in the output
-local function check_for_file_replacement(
-	output_lines,
-	context,
-	term_buf,
-	temp_file,
-	replacement_token,
-	cleanup_callback
-)
+local function check_for_file_replacement(output_lines, context, temp_file, replacement_token, cleanup_callback)
 	-- Scan through all output lines looking for the replacement token
 	for _, line in ipairs(output_lines) do
 		if line:find(replacement_token, 1, true) then -- Found the replacement signal
@@ -116,14 +109,7 @@ local function check_for_file_replacement(
 						-- Replace entire buffer content with new content
 						vim.api.nvim_buf_set_lines(original_buf, 0, -1, false, temp_content)
 						-- Send confirmation message to terminal
-						local success = pcall(
-							vim.fn.chansend,
-							vim.b[term_buf].terminal_job_id,
-							"\r\n✓ File contents replaced in editor buffer\r\n"
-						)
-						if not success then
-							vim.notify("File replaced but could not send terminal message", vim.log.levels.WARN)
-						end
+						vim.notify("File contents updated from Claude", vim.log.levels.INFO)
 					end
 				end
 			end
@@ -140,19 +126,61 @@ local function check_for_file_replacement(
 	end
 end
 
--- Create a new terminal window for displaying Claude Code output
--- Opens a horizontal split and sets up a terminal buffer
-local function create_terminal()
-	-- Create horizontal split window for terminal output
-	vim.cmd("split") -- Split window horizontally
-	local split_win = vim.api.nvim_get_current_win() -- Get the new split window
-	vim.api.nvim_win_set_height(split_win, 15) -- Set terminal window height to 15 lines
+-- Runs a command in the background and captures its output.
+-- The `on_finish` parameter is an optional callback function to run
+-- once the command is complete, receiving the output as an argument.
+local function run_terminal_command(command, on_finish)
+	local output_lines = {}
+	local stderr_lines = {}
 
-	-- Open terminal buffer in the split window
-	vim.cmd("terminal")
-	local term_buf = vim.api.nvim_get_current_buf()
+	vim.fn.jobstart(command, {
+		-- The `on_stdout` callback is fired for each chunk of output.
+		on_stdout = function(job_id, data, event)
+			-- `data` is a table of output lines. We append them to our list.
+			if data then
+				for _, line in ipairs(data) do
+					if line ~= "" then
+						table.insert(output_lines, line)
+					end
+				end
+			end
+		end,
 
-	return term_buf
+		-- It's also good practice to capture stderr.
+		on_stderr = function(job_id, data, event)
+			if data then
+				for _, line in ipairs(data) do
+					if line ~= "" then
+						table.insert(stderr_lines, line)
+					end
+				end
+			end
+		end,
+
+		-- The `on_exit` callback is fired when the command is finished.
+		on_exit = function(job_id, exit_code, event)
+			-- Now that the job is done, we can process the captured output.
+			if exit_code ~= 0 then
+				local msg = "Job '" .. command .. "' failed with exit code: " .. exit_code
+				vim.notify(msg, vim.log.levels.ERROR)
+				-- You might want to show stderr here
+				print("Stderr:")
+				print(vim.inspect(stderr_lines))
+				return
+			end
+
+			vim.notify("Job '" .. command .. "' finished successfully.", vim.log.levels.INFO)
+
+			-- If a callback was provided, call it with the output
+			if on_finish and type(on_finish) == "function" then
+				on_finish(output_lines)
+			else
+				-- Default behavior: print the captured output
+				print("Captured output:")
+				print(vim.inspect(output_lines))
+			end
+		end,
+	})
 end
 
 -- Main function that orchestrates the Claude Code integration
@@ -254,50 +282,29 @@ local function run_claude_code(user_input, context)
 	end
 
 	-- Build command to run Claude Code with context and user prompt
-	local escaped_input = user_input:gsub('"', '\\"') -- Escape quotes in user input
 	-- Change to project root before running Claude Code if project root is defined
-	local cd_prefix = ""
+	local cmd = {}
 	if context.project_root then
-		cd_prefix = string.format('cd "%s" && ', context.project_root)
+		table.insert(cmd, "cd")
+		table.insert(cmd, context.project_root)
+		table.insert(cmd, "&&")
 	end
-	-- Pipe context file to Claude Code with user's prompt as argument
-	local cmd = string.format('%scat "%s" | %s "%s"', cd_prefix, context_file, config.claude_code_binary, escaped_input)
+	table.insert(cmd, "cat")
+	table.insert(cmd, context_file)
+	table.insert(cmd, "|")
+	table.insert(cmd, config.claude_code_binary)
+	table.insert(cmd, user_input)
 
 	-- Create terminal window for Claude Code output
-	local term_buf = create_terminal()
+	run_terminal_command(cmd, function(output)
+		-- Function to clean up temporary files
+		local cleanup = function()
+			os.remove(context_file)
+			os.remove(output_file)
+		end
 
-	-- Get the terminal job ID that was created with the terminal
-	local job_id = vim.b[term_buf].terminal_job_id
-
-	-- Send command to the terminal
-	vim.fn.chansend(job_id, cmd .. "\n")
-
-	-- Track output lines to detect file replacement requests
-	local output_lines = {}
-
-	-- Set up autocmd to monitor terminal output for file replacement
-	local au_id = vim.api.nvim_create_autocmd("TermClose", {
-		buffer = term_buf,
-		callback = function()
-			vim.schedule(function()
-				-- Function to clean up temporary files
-				local cleanup = function()
-					os.remove(context_file)
-					os.remove(output_file)
-				end
-
-				-- Read terminal buffer content to check for replacement token
-				local term_lines = vim.api.nvim_buf_get_lines(term_buf, 0, -1, false)
-				check_for_file_replacement(term_lines, context, term_buf, output_file, replacement_token, cleanup)
-				
-				-- Close the terminal window automatically when command finishes
-				local term_win = vim.fn.bufwinid(term_buf)
-				if term_win ~= -1 then
-					vim.api.nvim_win_close(term_win, false)
-				end
-			end)
-		end,
-	})
+		check_for_file_replacement(output, context, output_file, replacement_token, cleanup)
+	end)
 
 	-- Enter insert mode in the terminal so user can see live output
 	vim.cmd("startinsert")
