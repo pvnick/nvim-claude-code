@@ -145,12 +145,12 @@ end
 local function create_terminal()
 	-- Create horizontal split window for terminal output
 	vim.cmd("split") -- Split window horizontally
-	vim.cmd("resize 15") -- Set terminal window height to 15 lines
+	local split_win = vim.api.nvim_get_current_win() -- Get the new split window
+	vim.api.nvim_win_set_height(split_win, 15) -- Set terminal window height to 15 lines
 
-	-- Create a new buffer for the terminal
-	local term_buf = vim.api.nvim_create_buf(false, true) -- unlisted, scratch buffer
-	vim.api.nvim_set_option_value("buftype", "terminal", { buf = term_buf })
-	vim.api.nvim_win_set_buf(0, term_buf) -- Set current window to use terminal buffer
+	-- Open terminal buffer in the split window
+	vim.cmd("terminal")
+	local term_buf = vim.api.nvim_get_current_buf()
 
 	return term_buf
 end
@@ -266,56 +266,32 @@ local function run_claude_code(user_input, context)
 	-- Create terminal window for Claude Code output
 	local term_buf = create_terminal()
 
+	-- Get the terminal job ID that was created with the terminal
+	local job_id = vim.b[term_buf].terminal_job_id
+
+	-- Send command to the terminal
+	vim.fn.chansend(job_id, cmd .. "\n")
+
 	-- Track output lines to detect file replacement requests
 	local output_lines = {}
 
-	-- Start Claude Code process with callback handlers
-	local job_id = vim.fn.jobstart(cmd, {
-		-- Capture standard output and store for file replacement detection
-		on_stdout = function(_, data)
-			if data then
-				for _, line in ipairs(data) do
-					if line ~= "" then
-						table.insert(output_lines, line) -- Store each output line
-					end
-				end
-			end
-		end,
-		-- Capture error output and mark it clearly
-		on_stderr = function(_, data)
-			if data then
-				for _, line in ipairs(data) do
-					if line ~= "" then
-						table.insert(output_lines, "ERROR: " .. line) -- Prefix errors
-					end
-				end
-			end
-		end,
-		-- Handle process completion
-		on_exit = function(_, code)
-			vim.schedule(function() -- Schedule for main thread execution
+	-- Set up autocmd to monitor terminal output for file replacement
+	local au_id = vim.api.nvim_create_autocmd("TermClose", {
+		buffer = term_buf,
+		callback = function()
+			vim.schedule(function()
 				-- Function to clean up temporary files
 				local cleanup = function()
-					os.remove(context_file) -- Delete context temp file
-					os.remove(output_file) -- Delete output temp file
+					os.remove(context_file)
+					os.remove(output_file)
 				end
 
-				-- Only check for file replacement if Claude Code succeeded
-				if code == 0 then
-					check_for_file_replacement(output_lines, context, term_buf, output_file, replacement_token, cleanup)
-				else
-					cleanup() -- Clean up immediately on error
-				end
+				-- Read terminal buffer content to check for replacement token
+				local term_lines = vim.api.nvim_buf_get_lines(term_buf, 0, -1, false)
+				check_for_file_replacement(term_lines, context, term_buf, output_file, replacement_token, cleanup)
 			end)
 		end,
-		-- Connect job output to terminal buffer
-		pty = true,
-		stdout_buffered = false,
-		stderr_buffered = false,
 	})
-
-	-- Store job id in terminal buffer for later communication
-	vim.b[term_buf].terminal_job_id = job_id
 
 	-- Enter insert mode in the terminal so user can see live output
 	vim.cmd("startinsert")
