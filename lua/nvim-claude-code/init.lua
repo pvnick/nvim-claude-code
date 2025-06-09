@@ -14,7 +14,7 @@ local function is_valid_line_range(start_line, end_line, total_lines)
 		and end_line > 0
 		and start_line <= total_lines
 		and end_line <= total_lines
-		and start_line ~= end_line
+		and start_line <= end_line
 end
 
 local function get_visual_selection_range(lines)
@@ -94,26 +94,23 @@ end
 
 -- Monitor Claude Code output for file replacement requests
 -- This function checks if Claude Code wants to update the current file
--- by looking for a special token in the output
-local function check_for_file_replacement(output_lines, context, temp_file, replacement_token)
-	-- Scan through all output lines looking for the replacement token
-	for _, line in ipairs(output_lines) do
-		if line:find(replacement_token, 1, true) then -- Found the replacement signal
-			-- Claude Code has written new content to the temp file, apply it to the buffer
-			if vim.fn.filereadable(temp_file) == 1 then
-				local temp_content = vim.fn.readfile(temp_file) -- Read new content from temp file
-				if context.filename and context.filename ~= "" then
-					-- Find the original buffer and replace its contents
-					local original_buf = vim.fn.bufnr(context.filename)
-					if original_buf ~= -1 then
-						-- Replace entire buffer content with new content
-						vim.api.nvim_buf_set_lines(original_buf, 0, -1, false, temp_content)
-						-- Send confirmation message to terminal
-						vim.notify("File contents updated from Claude", vim.log.levels.INFO)
-					end
+-- by looking for difference between buffer and temp file
+local function check_for_file_replacement(output_lines, context, temp_file)
+	if vim.fn.filereadable(temp_file) == 1 then
+		local temp_content = vim.fn.readfile(temp_file) -- Read new content from temp file
+		local temp_content_str = table.concat(temp_content, "\n") -- Convert to string for comparison
+		if context.filename and context.filename ~= "" then
+			if context.content ~= temp_content_str then
+				-- Claude Code has written new content to the temp file, apply it to the buffer
+				-- Find the original buffer and replace its contents
+				local original_buf = vim.fn.bufnr(context.filename)
+				if original_buf ~= -1 then
+					-- Replace entire buffer content with new content
+					vim.api.nvim_buf_set_lines(original_buf, 0, -1, false, temp_content)
+					-- Send confirmation message to terminal
+					vim.notify("File contents updated from Claude", vim.log.levels.INFO)
 				end
 			end
-			return -- Exit early since we found and processed the token
 		end
 	end
 end
@@ -165,10 +162,18 @@ local function run_terminal_command(cmd, callback, opts)
 	local function on_stdout(job_id, data, event_type)
 		-- data is a list of lines
 		if data then
+			-- Limit output buffer size to prevent memory issues
 			for _, line in ipairs(data) do
 				-- Skip empty lines at the end
 				if line ~= "" then
-					table.insert(output_lines, line)
+					-- Prevent excessive memory usage by limiting output buffer
+					if #output_lines < 10000 then
+						table.insert(output_lines, line)
+					else
+						-- Remove oldest lines if buffer gets too large
+						table.remove(output_lines, 1)
+						table.insert(output_lines, line)
+					end
 				end
 			end
 		end
@@ -194,17 +199,20 @@ local function run_claude_code(user_input, context)
 	-- Create temporary files for communication with Claude Code
 	local context_file = vim.fn.tempname() -- File to pass context to Claude
 	local output_file = vim.fn.tempname() -- File for Claude to write changes to
-	-- Generate unique number that Claude will combine with NVIM_REPLACE_ prefix
-	local replacement_number = math.random(100000, 999999)
-	local replacement_token = "NVIM_REPLACE_" .. replacement_number
 
 	-- Initialize the output file with current content so Claude can read it first
 	-- This allows Claude to see the current state before making changes
 	if context.filename and context.filename ~= "" then
 		local file = io.open(output_file, "w")
 		if file then
-			file:write(context.content) -- Write current buffer content to temp file
+			local success, err = pcall(function()
+				file:write(context.content) -- Write current buffer content to temp file
+			end)
 			file:close()
+			if not success then
+				vim.notify("Failed to write to output file: " .. tostring(err), vim.log.levels.ERROR)
+				return
+			end
 		else
 			vim.notify("Failed to create output file", vim.log.levels.ERROR)
 			return
@@ -220,14 +228,12 @@ local function run_claude_code(user_input, context)
   given project.
   
   IMPORTANT: If you need to modify the currently open file, do NOT write to disk directly. Instead:
-  1. Read the current file contents from: %s
-  2. Write your complete updated file contents to: %s  
-  3. Output a token by concatenating "NVIM_REPLACE_" with "%s"
-  The editor will detect this token and replace the buffer contents with the temporary file.
+  1. Read the current file contents from temp file: %s
+  2. Write your complete updated file contents to temp file: %s  
+  The editor will detect this change and replace the buffer contents with the temporary file.
   ]],
 		output_file,
-		output_file,
-		replacement_number
+		output_file
 	)
 
 	-- Add current file information to context
@@ -279,8 +285,14 @@ local function run_claude_code(user_input, context)
 	-- Write all context information to temporary file for Claude Code
 	local file = io.open(context_file, "w")
 	if file then
-		file:write(context_info) -- Write complete context to temp file
+		local success, err = pcall(function()
+			file:write(context_info) -- Write complete context to temp file
+		end)
 		file:close()
+		if not success then
+			vim.notify("Failed to write context file: " .. tostring(err), vim.log.levels.ERROR)
+			return
+		end
 	else
 		vim.notify("Failed to create temporary file", vim.log.levels.ERROR)
 		return
@@ -302,7 +314,7 @@ local function run_claude_code(user_input, context)
 
 	-- Create terminal window for Claude Code output
 	run_terminal_command(cmd, function(output, exit_code)
-		check_for_file_replacement(output, context, output_file, replacement_token)
+		check_for_file_replacement(output, context, output_file)
 		-- Clean up temp files
 		os.remove(context_file)
 		os.remove(output_file)
