@@ -198,12 +198,12 @@ end
 local function run_claude_code(user_input, context)
 	-- Create temporary files for communication with Claude Code
 	local context_file = vim.fn.tempname() -- File to pass context to Claude
-	local output_file = vim.fn.tempname() -- File for Claude to write changes to
+	local temp_buffer_file = vim.fn.tempname() -- File for Claude to write changes to
 
 	-- Initialize the output file with current content so Claude can read it first
 	-- This allows Claude to see the current state before making changes
 	if context.filename and context.filename ~= "" then
-		local file = io.open(output_file, "w")
+		local file = io.open(temp_buffer_file, "w")
 		if file then
 			local success, err = pcall(function()
 				file:write(context.content) -- Write current buffer content to temp file
@@ -223,17 +223,18 @@ local function run_claude_code(user_input, context)
 	-- This tells Claude how to interact with the editor through temporary files
 	local context_info = string.format(
 		[[
-  You are processing a file that's open in an editor. You will receive the filename and project root, and either the current cursor line
-  or selected lines, as well as a prompt. Process and execute the prompt as given. You can also do other things as necessary within the
-  given project.
-  
-  IMPORTANT: If you need to modify the currently open file, do NOT write to disk directly. Instead:
-  1. Read the current file contents from temp file: %s
-  2. Write your complete updated file contents to temp file: %s  
-  The editor will detect this change and replace the buffer contents with the temporary file.
-  ]],
-		output_file,
-		output_file
+      You are processing a file that's open in an editor. You will receive the filename and project root, and either the current cursor line
+      or selected lines, as well as a prompt. Process and execute the prompt as given. You can also do other things as necessary within the
+      given project.
+
+      IMPORTANT: If you need to modify the currently open file, do NOT write to disk directly. Instead:
+      1. Read the current file contents from the temporary buffer file: %s
+      2. Write your complete updated file contents to the temporary buffer file: %s  
+      Always read the temporary buffer file first before writing. Never attempt to write the output buffer before reading.
+      The editor will detect this change and replace the editor contents with the temporary file.
+    ]],
+		temp_buffer_file,
+		temp_buffer_file
 	)
 
 	-- Add current file information to context
@@ -314,10 +315,10 @@ local function run_claude_code(user_input, context)
 
 	-- Create terminal window for Claude Code output
 	run_terminal_command(cmd, function(output, exit_code)
-		check_for_file_replacement(output, context, output_file)
+		check_for_file_replacement(output, context, temp_buffer_file)
 		-- Clean up temp files
 		os.remove(context_file)
-		os.remove(output_file)
+		os.remove(temp_buffer_file)
 	end)
 end
 
