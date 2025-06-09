@@ -121,8 +121,7 @@ The plugin creates a seamless integration between Neovim and Claude Code:
 1. **Context Collection**: Gathers current file state, cursor position, and project information
 2. **Temporary Files**: Creates temporary files for secure communication with Claude Code
 3. **Terminal Integration**: Opens an interactive terminal to show Claude's real-time output
-4. **Smart File Updates**: Uses a token-based system to detect when Claude wants to modify your file
-5. **Buffer Management**: Updates your editor buffer directly without touching the file system
+4. **Buffer Management**: Updates your editor buffer directly without touching the file system
 
 ## Supported Project Types
 
